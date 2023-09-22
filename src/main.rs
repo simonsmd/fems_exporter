@@ -148,7 +148,7 @@ async fn metrics(
             F64 => decode_f64(&data).to_string(),
         };
 
-        report.push_str(&format!("{metric_name}{{fems_id = {name}}} {value}\n"));
+        report.push_str(&format!("{metric_name}{{fems_id = \"{name}\"}} {value}\n"));
     }
 
     (StatusCode::OK, report)
