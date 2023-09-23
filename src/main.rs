@@ -58,40 +58,39 @@ fn decode_f64(data: &[u16]) -> f64 {
     f64::from_be_bytes(bytes)
 }
 
-const MODBUS_METRICS: [(&str, u16, ModbusType); 33] = [
-    ("fems_state", 222, U16),
-    ("fems_ess_soc", 302, U16),
-    ("fems_ess_active_power", 303, F32),
-    ("fems_ess_reactive_power", 309, F32),
-    ("fems_grid_active_power", 315, F32),
-    ("fems_production_active_power", 327, F32),
-    ("fems_production_ac_active_power", 331, F32),
-    ("fems_production_dc_actual_power", 339, F32),
-    ("fems_consumption_active_power", 343, F32),
-    ("fems_ess_active_charge_energy", 351, F64),
-    ("fems_ess_active_discharge_energy", 355, F64),
-    ("fems_grid_buy_active_energy", 359, F64),
-    ("fems_grid_sell_active_energy", 363, F64),
-    ("fems_production_active_energy", 367, F64),
-    ("fems_production_ac_active_energy", 371, F64),
-    ("fems_production_dc_active_energy", 375, F64),
-    ("fems_consumption_active_energy", 379, F64),
-    ("fems_ess_dc_charge_energy", 383, F64),
-    ("fems_ess_dc_discharge_energy", 387, F64),
-    ("fems_ess_active_power_l1", 391, F32),
-    ("fems_ess_active_power_l2", 393, F32),
-    ("fems_ess_active_power_l3", 395, F32),
-    ("fems_grid_active_power_l1", 397, F32),
-    ("fems_grid_active_power_l2", 399, F32),
-    ("fems_grid_active_power_l3", 401, F32),
-    ("fems_production_ac_active_power_l1", 403, F32),
-    ("fems_production_ac_active_power_l2", 405, F32),
-    ("fems_production_ac_active_power_l3", 407, F32),
-    ("fems_consumption_ac_active_power_l1", 409, F32),
-    ("fems_consumption_ac_active_power_l2", 411, F32),
-    ("fems_consumption_ac_active_power_l3", 413, F32),
-    ("fems_ess_discharge_power", 415, F32),
-    ("fems_grid_mode", 417, U16),
+const MODBUS_METRICS: [(&str, &[(&str, &str)], u16, ModbusType); 32] = [
+    ("fems_state", &[], 222, U16),
+    ("fems_grid_mode", &[], 417, U16),
+    ("fems_ess_soc_percent", &[], 302, U16),
+    ("fems_ess_power_watts_total", &[], 303, F32),
+    ("fems_ess_power_watts", &[("phase", "l1")], 391, F32),
+    ("fems_ess_power_watts", &[("phase", "l2")], 393, F32),
+    ("fems_ess_power_watts", &[("phase", "l3")], 395, F32),
+    ("fems_ess_discharge_power_watts_total", &[], 415, F32),
+    ("fems_ess_reactive_power_voltampere", &[], 309, F32),
+    ("fems_grid_power_watts_total", &[], 315, F32),
+    ("fems_grid_power_watts", &[("phase", "l1")], 397, F32),
+    ("fems_grid_power_watts", &[("phase", "l2")], 399, F32),
+    ("fems_grid_power_watts", &[("phase", "l3")], 401, F32),
+    ("fems_production_power_watts_total", &[], 327, F32),
+    ("fems_production_power_watts", &[("type", "dc")], 339, F32),
+    ("fems_production_power_watts", &[("type", "ac"), ("phase", "l1")], 403, F32),
+    ("fems_production_power_watts", &[("type", "ac"), ("phase", "l2")], 405, F32),
+    ("fems_production_power_watts", &[("type", "ac"), ("phase", "l3")], 407, F32),
+    ("fems_consumption_power_watts_total", &[], 343, F32),
+    ("fems_consumption_power_watts", &[("phase", "l3")], 409, F32),
+    ("fems_consumption_power_watts", &[("phase", "l3")], 411, F32),
+    ("fems_consumption_power_watts", &[("phase", "l3")], 413, F32),
+    ("fems_ess_charge_energy_watthours", &[], 351, F64),
+    ("fems_ess_discharge_energy_watthours", &[], 355, F64),
+    ("fems_ess_dc_charge_energy_watthours", &[], 383, F64),
+    ("fems_ess_dc_discharge_energy_watthours", &[], 387, F64),
+    ("fems_grid_buy_energy_watthours", &[], 359, F64),
+    ("fems_grid_sell_energy_watthours", &[], 363, F64),
+    ("fems_production_energy_watthours_total", &[], 367, F64),
+    ("fems_production_energy_watthours", &[("type", "ac")], 371, F64),
+    ("fems_production_energy_watthours", &[("type", "dc")], 375, F64),
+    ("fems_consumption_energy_watthours", &[], 379, F64),
 ];
 
 #[derive(Deserialize)]
@@ -102,7 +101,7 @@ struct Params {
 
 #[allow(unused_variables)]
 async fn metrics(
-    Query(Params { host, fems_id: name }): Query<Params>,
+    Query(Params { host, fems_id }): Query<Params>,
     State(state): State<ModbusState>,
 ) -> (StatusCode, String) {
     // Get existing connection or open a new one
@@ -127,7 +126,7 @@ async fn metrics(
 
     let mut report = String::new();
 
-    for (metric_name, address, modbus_type) in MODBUS_METRICS {
+    for (metric_name, labels, address, modbus_type) in MODBUS_METRICS {
         let data = ctx
             .read_input_registers(address, modbus_type.register_count())
             .await;
@@ -148,7 +147,13 @@ async fn metrics(
             F64 => decode_f64(&data).to_string(),
         };
 
-        report.push_str(&format!("{metric_name}{{fems_id = \"{name}\"}} {value}\n"));
+        let mut labels: Vec<(&str, &str)> = labels.into();
+        labels.push(("fems_id", &fems_id));
+
+        let labels: Vec<String> = labels.iter().map(|(l, v)| format!("{l} = \"{v}\"")).collect();
+        let labels = labels.join(", ");
+
+        report.push_str(&format!("{metric_name}{{{labels}}} {value}\n"));
     }
 
     (StatusCode::OK, report)
